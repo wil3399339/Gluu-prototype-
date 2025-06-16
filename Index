@@ -1,0 +1,142 @@
+// index.js
+const express = require('express');
+const mongoose = require('mongoose');
+const faker = require('faker');
+const cors = require('cors');
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// DB Setup
+mongoose.connect('mongodb://localhost/gluu_v1', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+});
+
+// Schemas
+const userSchema = new mongoose.Schema({
+  username: String,
+  email: String,
+  password: String,
+  coins: { type: Number, default: 0 },
+  followers: { type: Number, default: 0 },
+  lastCoinTime: { type: Date, default: Date.now },
+  lastFollowerTime: { type: Date, default: Date.now },
+  botFollowsEnabled: { type: Boolean, default: true }
+});
+
+const videoSchema = new mongoose.Schema({
+  uploader: String,
+  uploaderProfile: Object,
+  url: String,
+  description: String,
+  isBot: Boolean
+});
+
+const messageSchema = new mongoose.Schema({
+  senderId: String,
+  receiverId: String,
+  content: String,
+  timestamp: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+const Video = mongoose.model('Video', videoSchema);
+const Message = mongoose.model('Message', messageSchema);
+
+// Auth routes
+app.post('/api/register', async (req, res) => {
+  const { username, email, password } = req.body;
+  const newUser = new User({ username, email, password });
+  await newUser.save();
+  res.json(newUser);
+});
+
+app.post('/api/login', async (req, res) => {
+  const { email, password } = req.body;
+  const user = await User.findOne({ email, password });
+  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+  // Update coins/followers
+  const now = new Date();
+  const minsSinceCoins = Math.floor((now - user.lastCoinTime) / 60000);
+  const minsSinceFollowers = Math.floor((now - user.lastFollowerTime) / 60000);
+
+  if (minsSinceCoins > 0) {
+    user.coins += 100 * minsSinceCoins;
+    user.lastCoinTime = now;
+  }
+
+  if (minsSinceFollowers > 0) {
+    user.followers += 100 * minsSinceFollowers;
+    user.lastFollowerTime = now;
+  }
+
+  await user.save();
+  res.json(user);
+});
+
+// Bot Video Generator
+app.post('/api/bots/post', async (req, res) => {
+  const gender = Math.random() > 0.5 ? 'men' : 'women';
+  const id = Math.floor(Math.random() * 100);
+
+  const profile = {
+    name: faker.name.findName(),
+    username: faker.internet.userName(),
+    bio: faker.lorem.sentence(),
+    profilePic: `https://randomuser.me/api/portraits/${gender}/${id}.jpg`,
+    country: faker.address.country()
+  };
+
+  const video = new Video({
+    uploader: profile.username,
+    uploaderProfile: profile,
+    url: `https://random.video/${Math.floor(Math.random() * 9999)}`,
+    description: faker.lorem.sentence(),
+    isBot: true
+  });
+
+  await video.save();
+  res.json({ success: true, video });
+});
+
+// Get all videos
+app.get('/api/videos', async (req, res) => {
+  const videos = await Video.find().sort({ _id: -1 }).limit(50);
+  res.json(videos);
+});
+
+// Send message
+app.post('/api/messages/send', async (req, res) => {
+  const { senderId, receiverId, content } = req.body;
+  const message = new Message({ senderId, receiverId, content });
+  await message.save();
+  res.json(message);
+});
+
+// Get conversation
+app.get('/api/messages/:user1/:user2', async (req, res) => {
+  const { user1, user2 } = req.params;
+  const messages = await Message.find({
+    $or: [
+      { senderId: user1, receiverId: user2 },
+      { senderId: user2, receiverId: user1 }
+    ]
+  }).sort({ timestamp: 1 });
+  res.json(messages);
+});
+
+// Toggle bot follows
+app.post('/api/settings/botfollows', async (req, res) => {
+  const { userId, enabled } = req.body;
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.botFollowsEnabled = enabled;
+  await user.save();
+  res.json({ success: true, status: enabled });
+});
+
+// Start server
+app.listen(5000, () => console.log('Gluu backend running on http://localhost:5000'));
