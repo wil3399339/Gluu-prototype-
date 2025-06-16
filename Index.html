@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gluu Static App</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  #app { max-width: 600px; margin: auto; }
+  input, button { margin: 5px 0; padding: 8px; width: 100%; }
+  .hidden { display: none; }
+  .video { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+  .message { border-bottom: 1px solid #ddd; padding: 5px 0; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <h1>Gluu Static App</h1>
+    <div id="auth-section">
+      <input id="username" placeholder="Username" />
+      <input id="email" placeholder="Email" />
+      <input id="password" type="password" placeholder="Password" />
+      <button id="register-btn">Register</button>
+      <button id="login-btn">Login</button>
+      <p id="auth-message" style="color: red;"></p>
+    </div>
+
+    <div id="user-section" class="hidden">
+      <h2>Welcome, <span id="user-name"></span></h2>
+      <p>Coins: <span id="coins">0</span> | Followers: <span id="followers">0</span></p>
+      <button id="heartbeat-btn">Get Coins & Followers</button>
+      <button id="logout-btn">Logout</button>
+
+      <h3>Videos</h3>
+      <div id="videos-list"></div>
+
+      <h3>Send Message</h3>
+      <input id="receiver" placeholder="Receiver Username" />
+      <input id="message-content" placeholder="Message content" />
+      <button id="send-message-btn">Send Message</button>
+
+      <h3>Messages</h3>
+      <input id="chat-user" placeholder="Chat with Username" />
+      <button id="load-messages-btn">Load Messages</button>
+      <div id="messages-list"></div>
+    </div>
+  </div>
+
+<script>
+  // In-memory users, videos, messages stored in localStorage
+
+  // Load users or initialize
+  let users = JSON.parse(localStorage.getItem('users') || '[]');
+  let videos = JSON.parse(localStorage.getItem('videos') || '[]');
+  let messages = JSON.parse(localStorage.getItem('messages') || '[]');
+
+  let currentUser = null;
+
+  // Helper to save back to localStorage
+  function saveData() {
+    localStorage.setItem('users', JSON.stringify(users));
+    localStorage.setItem('videos', JSON.stringify(videos));
+    localStorage.setItem('messages', JSON.stringify(messages));
+  }
+
+  // Auth functions
+  function register(username, email, password) {
+    if (users.find(u => u.email === email)) {
+      showAuthMessage('Email already registered.');
+      return false;
+    }
+    users.push({
+      id: Date.now(),
+      username,
+      email,
+      password,
+      coins: 0,
+      followers: 0,
+      lastCoinTime: Date.now(),
+      lastFollowerTime: Date.now(),
+      botFollowsEnabled: true
+    });
+    saveData();
+    showAuthMessage('Registered successfully! Please login.');
+    return true;
+  }
+
+  function login(email, password) {
+    const user = users.find(u => u.email === email && u.password === password);
+    if (!user) {
+      showAuthMessage('Invalid credentials.');
+      return false;
+    }
+    currentUser = user;
+    updateUI();
+    showAuthMessage('');
+    return true;
+  }
+
+  function logout() {
+    currentUser = null;
+    updateUI();
+  }
+
+  // Show auth messages
+  function showAuthMessage(msg) {
+    document.getElementById('auth-message').textContent = msg;
+  }
+
+  // Update UI based on login state
+  function updateUI() {
+    if (currentUser) {
+      document.getElementById('auth-section').classList.add('hidden');
+      document.getElementById('user-section').classList.remove('hidden');
+      document.getElementById('user-name').textContent = currentUser.username;
+      document.getElementById('coins').textContent = currentUser.coins;
+      document.getElementById('followers').textContent = currentUser.followers;
+      renderVideos();
+      document.getElementById('messages-list').innerHTML = '';
+    } else {
+      document.getElementById('auth-section').classList.remove('hidden');
+      document.getElementById('user-section').classList.add('hidden');
+    }
+  }
+
+  // Add some fake videos if empty
+  if (videos.length === 0) {
+    videos.push({
+      id: 1,
+      uploader: 'botUser',
+      url: 'https://random.video/1234',
+      description: 'A cool bot video',
+      isBot: true,
+      createdAt: Date.now()
+    });
+    saveData();
+  }
+
+  function renderVideos() {
+    const container = document.getElementById('videos-list');
+    container.innerHTML = '';
+    videos.forEach(v => {
+      const div = document.createElement('div');
+      div.className = 'video';
+      div.innerHTML = `
+        <strong>${v.uploader}</strong> <br/>
+        <a href="${v.url}" target="_blank">${v.url}</a><br/>
+        <em>${v.description}</em><br/>
+        <small>${new Date(v.createdAt).toLocaleString()}</small>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  // Heartbeat: add coins/followers over time
+  function heartbeat() {
+    if (!currentUser) return;
+    const now = Date.now();
+    const minsCoins = Math.floor((now - currentUser.lastCoinTime) / 60000);
+    const minsFollowers = Math.floor((now - currentUser.lastFollowerTime) / 60000);
+    if (minsCoins > 0) {
+      currentUser.coins += 100 * minsCoins;
+      currentUser.lastCoinTime = now;
+    }
+    if (minsFollowers > 0 && currentUser.botFollowsEnabled) {
+      currentUser.followers += 100 * minsFollowers;
+      currentUser.lastFollowerTime = now;
+    }
+    // Save updated user
+    users = users.map(u => u.id === currentUser.id ? currentUser : u);
+    saveData();
+    updateUI();
+  }
+
+  // Send message
+  function sendMessage(receiverUsername, content) {
+    if (!currentUser) return alert('Please login.');
+    const receiver = users.find(u => u.username === receiverUsername);
+    if (!receiver) return alert('Receiver not found.');
+    messages.push({
+      id: Date.now(),
+      senderId: currentUser.id,
+      receiverId: receiver.id,
+      content,
+      timestamp: Date.now()
+    });
+    saveData();
+    alert('Message sent!');
+  }
+
+  // Load messages between currentUser and chatUser
+  function loadMessages(chatUsername) {
+    if (!currentUser) return alert('Please login.');
+    const chatUser = users.find(u => u.username === chatUsername);
+    if (!chatUser) return alert('User not found.');
+    const chatMessages = messages.filter(m =>
+      (m.senderId === currentUser.id && m.receiverId === chatUser.id) ||
+      (m.senderId === chatUser.id && m.receiverId === currentUser.id)
+    ).sort((a,b) => a.timestamp - b.timestamp);
+
+    const container = document.getElementById('messages-list');
+    container.innerHTML = '';
+    chatMessages.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'message';
+      div.innerHTML = `<strong>${m.senderId === currentUser.id ? 'You' : chatUser.username}:</strong> ${m.content} <br/><small>${new Date(m.timestamp).toLocaleString()}</small>`;
+      container.appendChild(div);
+    });
+  }
+
+  // Event listeners
+  document.getElementById('register-btn').onclick = () => {
+    const username = document.getElementById('username').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value.trim();
+    if (!username || !email || !password) return showAuthMessage('Fill all fields');
+    register(username, email, password);
+  };
+
+  document.getElementById('login-btn').onclick = () => {
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value.trim();
+    if (!email || !password) return showAuthMessage('Fill all fields');
+    login(email, password);
+  };
+
+  document.getElementById('logout-btn').onclick = () => {
+    logout();
+  };
+
+  document.getElementById('heartbeat-btn').onclick = () => {
+    heartbeat();
+  };
+
+  document.getElementById('send-message-btn').onclick = () => {
+    const receiver = document.getElementById('receiver').value.trim();
+    const content = document.getElementById('message-content').value.trim();
+    if (!receiver || !content) return alert('Fill all fields');
+    sendMessage(receiver, content);
+  };
+
+  document.getElementById('load-messages-btn').onclick = () => {
+    const chatUser = document.getElementById('chat-user').value.trim();
+    if (!chatUser) return alert('Enter username');
+    loadMessages(chatUser);
+  };
+
+  // Init UI
+  updateUI();
+</script>
+</body>
+</html>
